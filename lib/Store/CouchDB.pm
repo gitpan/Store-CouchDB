@@ -43,7 +43,7 @@ brilliant Encoding::FixLatin module to fix this on the fly.
 
 =cut
 
-our $VERSION = '1.4';
+our $VERSION = '1.5';
 
 has 'debug' => (
     is        => 'rw',
@@ -392,8 +392,12 @@ sub get_array_view {
             push( @{$result}, $doc->{doc} );
         } else {
             next unless $doc->{value};
-            $doc->{value}->{id} = $doc->{id};
-            push( @{$result}, $doc->{value} );
+            if(ref($doc->{value}) eq 'HASH'){
+                $doc->{value}->{id} = $doc->{id};
+                push( @{$result}, $doc->{value} );
+            } else {
+                push(@{$result}, $doc);
+            }
         }
     }
     return $result;
