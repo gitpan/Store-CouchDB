@@ -43,7 +43,7 @@ brilliant Encoding::FixLatin module to fix this on the fly.
 
 =cut
 
-our $VERSION = '1.5';
+our $VERSION = '1.7';
 
 has 'debug' => (
     is        => 'rw',
@@ -376,6 +376,11 @@ most and has the best support for corner cases.
        }
    );
 
+A normal response hash would be the "value" part of the document with
+the _id moved in as "id". If the response is not a HASH (the request was
+resulting in key/value pairs) the entire doc is returned resulting in a
+hash of key/value/id per document.
+
 =cut
 
 sub get_array_view {
@@ -513,10 +518,13 @@ sub _call {
     my $req = HTTP::Request->new();
     $req->method( $self->method );
     $req->uri($uri);
+
     $req->content( fix_latin( to_json($content, {allow_blessed => 1, convert_blessed => 1}), bytes_only => 1 ) )
       if ($content);
 
     my $ua  = LWP::UserAgent->new();
+    # FIXME set the content type to application/json
+    $ua->default_header('Content-Type' => "application/json");
     my $res = $ua->request($req);
     print STDERR "Result: " . $res->decoded_content . "\n" if $self->is_debug;
     if ( $res->is_success ) {
