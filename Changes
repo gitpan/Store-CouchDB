@@ -1,5 +1,23 @@
 Revision history for Store-CouchDB
 
+1.11    2011-08-16T15:47:58
+        - added url_encode to encode option parameters with a '+'
+        - changed to Any::Moose
+
+1.10    2011-07-29T20:20:47
+        reset the method DELETE after a delete just to be sure nothing
+        unwanted happens
+
+1.9     2011-04-28T15:14:15
+        added support for include_docs=true view calls
+
+1.8     2011-04-21T14:07:24
+        added auth support for newer couchdb versions
+        made debug work the way it should:
+          - default off
+          - turn on with $self->debug
+          - added clearer to turn off: $self->no_debug
+
 1.7     2011-02-07T10:31:54
         added a applicatio/json header
 

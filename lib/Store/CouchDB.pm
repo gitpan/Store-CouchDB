@@ -1,6 +1,6 @@
 package Store::CouchDB;
 
-use Mouse;
+use Any::Moose;
 use JSON;
 use LWP::UserAgent;
 use URI;
@@ -13,7 +13,7 @@ Store::CouchDB - a simple CouchDB driver
 
 =head1 VERSION
 
-VERSION 1.4
+Version 1.11.11.10.9.8.8
 
 =cut
 
@@ -43,13 +43,20 @@ brilliant Encoding::FixLatin module to fix this on the fly.
 
 =cut
 
-our $VERSION = '1.7';
+our $VERSION = '1.11';
 
 has 'debug' => (
     is        => 'rw',
-    required  => 1,
     default   => sub { },
+    lazy      => 1,
     predicate => 'is_debug',
+    clearer   => 'no_debug',
+);
+
+has 'url_encode' => (
+    is => 'rw',
+    isa => 'Bool',
+    default => 0
 );
 
 has 'host' => (
@@ -68,6 +75,14 @@ has 'db' => (
     is       => 'rw',
     required => 1,
     default  => sub { '' }
+);
+
+has 'user' => (
+    is => 'rw',
+);
+
+has 'pass' => (
+    is => 'rw',
 );
 
 has 'method' => (
@@ -107,6 +122,14 @@ The port to use. Defaults to '5984'
 =head3 db
 
 The DB to use. This has to be set for all oprations!
+
+=head3 user
+
+The DB user to authenticate as. optional
+
+=head3 pass
+
+The password for the user to authenticate with. required if user is given.
 
 =head3 method
 
@@ -228,6 +251,7 @@ sub del_doc {
     $self->method('DELETE');
     $path = $self->db . '/' . $id . '?rev=' . $rev;
     my $res = $self->_call($path);
+    $self->method('GET');
     return $res->{rev} || undef;
 
 }
@@ -313,11 +337,14 @@ sub get_view {
     my $c = 0;
     my $result;
     foreach my $doc ( @{ $res->{rows} } ) {
+        if($doc->{doc}){
+            $result->{ $doc->{key} || $c } = $doc->{doc};
+        } else {
         next unless $doc->{value};
-
-        # TODO debug why this crashes from time to time
-        #$doc->{value}->{id} = $doc->{id};
-        $result->{ $doc->{key} || $c } = $doc->{value};
+            # TODO debug why this crashes from time to time
+            #$doc->{value}->{id} = $doc->{id};
+            $result->{ $doc->{key} || $c } = $doc->{value};
+        }
         $c++;
     }
     return $result;
@@ -502,6 +529,9 @@ sub _make_view_path {
     if ( $data->{opts} ) {
         my @opts;
         foreach my $opt ( keys %{ $data->{opts} } ) {
+            if($self->url_encode){
+                $data->{opts}->{$opt} =~ s/\+/%2B/g;
+            }
             push( @opts, $opt . '=' . $data->{opts}->{$opt} );
         }
         my $_opt = join( '&', @opts );
@@ -512,7 +542,10 @@ sub _make_view_path {
 
 sub _call {
     my ( $self, $path, $content ) = @_;
-    my $uri = 'http://' . $self->host . ':' . $self->port . '/' . $path;
+    my $uri = 'http://';
+    $uri .= $self->user . ':' . $self->pass . '@'
+        if ($self->user and $self->pass);
+    $uri .= $self->host . ':' . $self->port . '/' . $path;
     print STDERR "URI: $uri\n" if $self->is_debug;
 
     my $req = HTTP::Request->new();
