@@ -12,7 +12,7 @@ Store::CouchDB - a simple CouchDB driver
 
 =head1 VERSION
 
-Version 2.1.0.0.16.16
+Version 2.2.1.0.0.16.16
 
 =cut
 
@@ -42,7 +42,7 @@ brilliant Encoding::FixLatin module to fix this on the fly.
 
 =cut
 
-our $VERSION = '2.1';
+our $VERSION = '2.2';
 
 has 'debug' => (
     is      => 'rw',
@@ -361,17 +361,20 @@ sub get_view {
 
     return unless $res->{rows}->[0];
     my $c = 0;
-    my $result;
+    my $result = {};
     foreach my $doc (@{ $res->{rows} }) {
         if ($doc->{doc}) {
             $result->{ $doc->{key} || $c } = $doc->{doc};
         }
         else {
             next unless $doc->{value};
-
-            # TODO debug why this crashes from time to time
-            #$doc->{value}->{id} = $doc->{id};
-            $result->{ $doc->{key} || $c } = $doc->{value};
+            if(ref $doc->{key} eq 'ARRAY'){
+                _hash($result, $doc->{value}, @{$doc->{key}});
+            } else {
+                # TODO debug why this crashes from time to time
+                #$doc->{value}->{id} = $doc->{id};
+                $result->{ $doc->{key} || $c } = $doc->{value};
+            }
         }
         $c++;
     }
@@ -674,6 +677,15 @@ sub _call {
         $self->error($res->status_line);
     }
     return;
+}
+
+sub _hash {
+    my ($head, $val, @tail) = @_;
+    if($#tail == 0){
+        return $head->{shift(@tail)} = $val;
+    } else {
+        return _hash($head->{shift(@tail)} //= {}, $val, @tail);
+    }
 }
 
 =head1 EXPORT
