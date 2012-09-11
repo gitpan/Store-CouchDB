@@ -12,7 +12,7 @@ Store::CouchDB - a simple CouchDB driver
 
 =head1 VERSION
 
-Version 2.2.1.0.0.16.16
+Version 2.3.3.2.2.2
 
 =cut
 
@@ -42,7 +42,7 @@ brilliant Encoding::FixLatin module to fix this on the fly.
 
 =cut
 
-our $VERSION = '2.2';
+our $VERSION = '2.3';
 
 has 'debug' => (
     is      => 'rw',
@@ -96,6 +96,12 @@ has 'error' => (
 has 'purge_limit' => (
     is      => 'rw',
     default => sub { 5000 });
+
+has timeout => (
+    is      => 'rw',
+    isa     => 'Int',
+    default => sub { 30 },
+);
 
 =head1 FUNCTIONS
 
@@ -360,7 +366,7 @@ sub get_view {
     my $res  = $self->_call($path);
 
     return unless $res->{rows}->[0];
-    my $c = 0;
+    my $c      = 0;
     my $result = {};
     foreach my $doc (@{ $res->{rows} }) {
         if ($doc->{doc}) {
@@ -368,9 +374,10 @@ sub get_view {
         }
         else {
             next unless $doc->{value};
-            if(ref $doc->{key} eq 'ARRAY'){
-                _hash($result, $doc->{value}, @{$doc->{key}});
-            } else {
+            if (ref $doc->{key} eq 'ARRAY') {
+                _hash($result, $doc->{value}, @{ $doc->{key} });
+            }
+            else {
                 # TODO debug why this crashes from time to time
                 #$doc->{value}->{id} = $doc->{id};
                 $result->{ $doc->{key} || $c } = $doc->{value};
@@ -628,8 +635,8 @@ sub _make_view_path {
             given ($opt) {
                 when ([ 'key', 'startkey', 'endkey' ]) {
                     $data->{opts}->{$opt} =
-                        JSON->new->utf8->allow_nonref->encode(
-                        $data->{opts}->{$opt});
+                        JSON->new->utf8->allow_nonref->allow_blessed
+                        ->convert_blessed->encode($data->{opts}->{$opt});
                 }
             }
             $data->{opts}->{$opt} = uri_escape($data->{opts}->{$opt});
@@ -655,7 +662,7 @@ sub _call {
     $uri .= $self->user . ':' . $self->pass . '@'
         if ($self->user and $self->pass);
     $uri .= $self->host . ':' . $self->port . '/' . $path;
-    print STDERR "URI: $uri\n" if $self->debug;
+    print STDERR __PACKAGE__ . ": URI: $uri\n" if $self->debug;
 
     my $req = HTTP::Request->new();
     $req->method($self->method);
@@ -665,11 +672,16 @@ sub _call {
         JSON->new->utf8->allow_blessed->convert_blessed->encode($content))
         if ($content);
 
-    my $ua = LWP::UserAgent->new();
+    my $ua = LWP::UserAgent->new(timeout => $self->timeout);
 
     $ua->default_header('Content-Type' => "application/json");
     my $res = $ua->request($req);
-    print STDERR "Result: " . $res->decoded_content . "\n" if $self->debug;
+    if ($self->debug) {
+        require Data::Dumper;
+        print STDERR __PACKAGE__
+            . ": Result: "
+            . Data::Dumper::Dumper($res->decoded_content);
+    }
     if ($res->is_success) {
         return JSON->new->utf8->allow_nonref->decode($res->content);
     }
@@ -681,10 +693,11 @@ sub _call {
 
 sub _hash {
     my ($head, $val, @tail) = @_;
-    if($#tail == 0){
-        return $head->{shift(@tail)} = $val;
-    } else {
-        return _hash($head->{shift(@tail)} //= {}, $val, @tail);
+    if ($#tail == 0) {
+        return $head->{ shift(@tail) } = $val;
+    }
+    else {
+        return _hash($head->{ shift(@tail) } //= {}, $val, @tail);
     }
 }
 
