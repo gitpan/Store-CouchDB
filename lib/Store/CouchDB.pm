@@ -1,6 +1,5 @@
 package Store::CouchDB;
 
-use feature 'switch';
 use Any::Moose;
 use JSON;
 use LWP::UserAgent;
@@ -12,7 +11,7 @@ Store::CouchDB - a simple CouchDB driver
 
 =head1 VERSION
 
-Version 2.3.3.2.2.2
+Version 2.4.3
 
 =cut
 
@@ -42,7 +41,7 @@ brilliant Encoding::FixLatin module to fix this on the fly.
 
 =cut
 
-our $VERSION = '2.3';
+our $VERSION = '2.4';
 
 has 'debug' => (
     is      => 'rw',
@@ -473,7 +472,7 @@ sub get_view_array {
 =head2 get_array_view
 
 The get_array_view uses GET to call the view and returns an array
-ireference of matched documents. This view functions is the one I use
+reference of matched documents. This view functions is the one I use
 most and has the best support for corner cases.
 
    get_array_view(
@@ -632,12 +631,10 @@ sub _make_view_path {
     if ($data->{opts}) {
         $path .= '?';
         foreach my $opt (keys %{ $data->{opts} }) {
-            given ($opt) {
-                when ([ 'key', 'startkey', 'endkey' ]) {
-                    $data->{opts}->{$opt} =
-                        JSON->new->utf8->allow_nonref->allow_blessed
-                        ->convert_blessed->encode($data->{opts}->{$opt});
-                }
+            if ($opt =~ /key/) {
+                $data->{opts}->{$opt} =
+                    JSON->new->utf8->allow_nonref->allow_blessed
+                    ->convert_blessed->encode($data->{opts}->{$opt});
             }
             $data->{opts}->{$opt} = uri_escape($data->{opts}->{$opt});
             $path .= $opt . '=' . $data->{opts}->{$opt} . '&';
