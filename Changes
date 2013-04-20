@@ -1,5 +1,16 @@
 Revision history for Store-CouchDB
 
+2.7     2013-04-20T14:06:44
+        SSL/TLS support added by pmack
+
+2.6     2013-02-22T10:11:22
+        bugfix: don't ever fiddle with contents of $data in _make_view_path,
+        because it breaks reusing the same view later
+
+2.5     2013-02-04T19:56:14
+        - fixed bug where null value keys are left out of the response
+        - improved speed by reusing JSON object created once on load
+
 2.4     2012-10-23T20:22:15
         - fixed 5.10 dependency and ported that code back to 5.8
         - fixed type (thanks to weltonrodrigo)

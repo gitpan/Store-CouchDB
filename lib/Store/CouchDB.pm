@@ -11,7 +11,7 @@ Store::CouchDB - a simple CouchDB driver
 
 =head1 VERSION
 
-Version 2.4.3
+Version 2.7.7
 
 =cut
 
@@ -41,7 +41,7 @@ brilliant Encoding::FixLatin module to fix this on the fly.
 
 =cut
 
-our $VERSION = '2.4';
+our $VERSION = '2.7';
 
 has 'debug' => (
     is      => 'rw',
@@ -61,6 +61,13 @@ has 'port' => (
     isa      => 'Int',
     required => 1,
     default  => sub { 5984 });
+
+has 'ssl' => (
+    is      => 'rw',
+    isa     => 'Bool',
+    default => sub { 0 },
+    lazy    => 1,
+);
 
 has 'db' => (
     is        => 'rw',
@@ -96,10 +103,18 @@ has 'purge_limit' => (
     is      => 'rw',
     default => sub { 5000 });
 
-has timeout => (
+has 'timeout' => (
     is      => 'rw',
     isa     => 'Int',
     default => sub { 30 },
+);
+
+has 'json' => (
+    is      => 'rw',
+    isa     => 'JSON',
+    default => sub {
+        JSON->new->utf8->allow_nonref->allow_blessed->convert_blessed;
+    },
 );
 
 =head1 FUNCTIONS
@@ -119,6 +134,10 @@ The host to use. Defaults to 'localhost'
 =head3 port
 
 The port to use. Defaults to '5984'
+
+=head4 ssl
+
+Connect to host via SSL/TLS. Defaults to '0'
 
 =head3 db
 
@@ -158,14 +177,36 @@ The get_doc call returns a document by its ID
 sub get_doc {
     my ($self, $data) = @_;
 
+    if ($data->{dbname}) {
+        $self->db($data->{dbname});
+    }
     $self->_check_db;
     confess "Document ID not defined" unless $data->{id};
+
+    my $path = $self->db . '/' . $data->{id};
+    return $self->_call($path);
+}
+
+=head2 head_doc
+
+If all you need is the revision a HEAD call is enough.
+
+=cut
+
+sub head_doc {
+    my ($self, $data) = @_;
 
     if ($data->{dbname}) {
         $self->db($data->{dbname});
     }
+    $self->_check_db;
+    confess "Document ID not defined" unless $data->{id};
+    $self->method('HEAD');
+
     my $path = $self->db . '/' . $data->{id};
-    return $self->_call($path);
+    my $rev  = $self->_call($path);
+    $rev =~ s/"//g;
+    return $rev;
 }
 
 =head2 get_design_docs
@@ -263,8 +304,7 @@ sub del_doc {
     $self->_check_db;
 
     if (!$rev) {
-        my $doc = $self->get_doc({ id => $id });
-        $rev = $doc->{_rev};
+        $rev = $self->head_doc({ id => $id });
     }
 
     my $path;
@@ -365,6 +405,7 @@ sub get_view {
     my $res  = $self->_call($path);
 
     return unless $res->{rows}->[0];
+
     my $c      = 0;
     my $result = {};
     foreach my $doc (@{ $res->{rows} }) {
@@ -372,7 +413,7 @@ sub get_view {
             $result->{ $doc->{key} || $c } = $doc->{doc};
         }
         else {
-            next unless $doc->{value};
+            next unless exists $doc->{value};
             if (ref $doc->{key} eq 'ARRAY') {
                 _hash($result, $doc->{value}, @{ $doc->{key} });
             }
@@ -419,15 +460,18 @@ sub get_post_view {
     }
     my $path   = $self->_make_view_path($data);
     my $method = $self->method();
+
     $self->method('POST');
     my $res = $self->_call($path, $opts);
     $self->method($method);
+
     my $result;
     foreach my $doc (@{ $res->{rows} }) {
-        next unless $doc->{value};
+        next unless exists $doc->{value};
         $doc->{value}->{id} = $doc->{id};
         $result->{ $doc->{key} } = $doc->{value};
     }
+
     return $result;
 }
 
@@ -456,7 +500,7 @@ sub get_view_array {
             push(@result, $doc->{doc});
         }
         else {
-            next unless $doc->{value};
+            next unless exists $doc->{value};
             if (ref($doc->{value}) eq 'HASH') {
                 $doc->{value}->{id} = $doc->{id};
                 push(@result, $doc->{value});
@@ -501,13 +545,14 @@ sub get_array_view {
 
     my $path = $self->_make_view_path($data);
     my $res  = $self->_call($path);
+
     my $result;
     foreach my $doc (@{ $res->{rows} }) {
         if ($doc->{doc}) {
             push(@{$result}, $doc->{doc});
         }
         else {
-            next unless $doc->{value};
+            next unless exists $doc->{value};
             if (ref($doc->{value}) eq 'HASH') {
                 $doc->{value}->{id} = $doc->{id};
                 push(@{$result}, $doc->{value});
@@ -596,6 +641,69 @@ sub compact {
     return $res;
 }
 
+=head2 put_file
+
+To add an attachement to CouchDB use the put_file method. 'file' because
+it is shorter than attachement and less prone to misspellings. The
+put_file method works like the put_doc function and will add an
+attachement to an existing doc if the '_id' parameter is given or addes
+a new doc with the attachement if no '_id' parameter is given.
+The only mandatory parameter is the 'file' parameter.
+
+=cut
+
+sub put_file {
+    my ($self, $data) = @_;
+
+    confess "File content not defined" unless $data->{file};
+    confess "File name not defined"    unless $data->{filename};
+
+    if ($data->{dbname}) {
+        $self->db($data->{dbname});
+    }
+    $self->_check_db;
+
+    my $id  = $data->{id}  || $data->{doc}->{_id};
+    my $rev = $data->{rev} || $data->{doc}->{_rev};
+    my $method = $self->method();
+
+    if (!$rev and $id) {
+        $rev = $self->head_doc({ id => $id });
+        print STDERR ">>$rev<<\n";
+    }
+    ($id, $rev) = $self->put_doc({ doc => {} })
+        unless $id;    # create a new doc
+
+    my $path = $self->db . '/' . $id . '/' . $data->{filename} . '?rev=' . $rev;
+
+    $self->method('PUT');
+    my $res = $self->_call($path, $data->{file}, $data->{content_type});
+    $self->method($method);
+
+    return ($res->{id} || undef, $res->{rev} || undef) if wantarray;
+    return $res->{id} || undef;
+}
+
+=head2 get_file
+
+Get a file attachement from a CouchDB document.
+
+=cut
+
+sub get_file {
+    my ($self, $data) = @_;
+
+    if ($data->{dbname}) {
+        $self->db($data->{dbname});
+    }
+    $self->_check_db;
+    confess "Document ID not defined" unless $data->{id};
+    confess "File name not defined"   unless $data->{filename};
+
+    my $path = join('/', $self->db, $data->{id}, $data->{filename});
+    return $self->_call($path);
+}
+
 =head2 config
 
 This can be called with a hash of config values to configure the databse
@@ -624,20 +732,20 @@ sub _check_db {
 sub _make_view_path {
     my ($self, $data) = @_;
 
-    $data->{view} =~ s/^\///;
-    my @view = split(/\//, $data->{view}, 2);
+    my $view = $data->{view};
+    $view =~ s/^\///;
+    my @view = split(/\//, $view, 2);
     my $path = $self->db . '/_design/' . $view[0] . '/_view/' . $view[1];
 
-    if ($data->{opts}) {
+    if (keys %{ $data->{opts} }) {
         $path .= '?';
-        foreach my $opt (keys %{ $data->{opts} }) {
-            if ($opt =~ /key/) {
-                $data->{opts}->{$opt} =
-                    JSON->new->utf8->allow_nonref->allow_blessed
-                    ->convert_blessed->encode($data->{opts}->{$opt});
+        foreach my $key (keys %{ $data->{opts} }) {
+            my $value = $data->{opts}->{$key};
+            if ($key =~ m/key/) {
+                $value = $self->json->encode($value);
             }
-            $data->{opts}->{$opt} = uri_escape($data->{opts}->{$opt});
-            $path .= $opt . '=' . $data->{opts}->{$opt} . '&';
+            $value = uri_escape($value);
+            $path .= $key . '=' . $value . '&';
         }
 
         # remove last '&'
@@ -648,14 +756,14 @@ sub _make_view_path {
 }
 
 sub _call {
-    my ($self, $path, $content) = @_;
+    my ($self, $path, $content, $ct) = @_;
 
     binmode(STDERR, ":utf8");
 
     # cleanup old error
     $self->clear_error if $self->has_error;
 
-    my $uri = 'http://';
+    my $uri = ($self->ssl) ? 'https://' : 'http://';
     $uri .= $self->user . ':' . $self->pass . '@'
         if ($self->user and $self->pass);
     $uri .= $self->host . ':' . $self->port . '/' . $path;
@@ -665,13 +773,14 @@ sub _call {
     $req->method($self->method);
     $req->uri($uri);
 
-    $req->content(
-        JSON->new->utf8->allow_blessed->convert_blessed->encode($content))
-        if ($content);
+    $req->content((
+              $ct
+            ? $content
+            : $self->json->encode($content))) if ($content);
 
     my $ua = LWP::UserAgent->new(timeout => $self->timeout);
 
-    $ua->default_header('Content-Type' => "application/json");
+    $ua->default_header('Content-Type' => $ct || "application/json");
     my $res = $ua->request($req);
     if ($self->debug) {
         require Data::Dumper;
@@ -679,8 +788,22 @@ sub _call {
             . ": Result: "
             . Data::Dumper::Dumper($res->decoded_content);
     }
-    if ($res->is_success) {
-        return JSON->new->utf8->allow_nonref->decode($res->content);
+    if ($self->method eq 'HEAD') {
+        if ($self->debug) {
+            print STDERR __PACKAGE__
+                . ": Revision: "
+                . $res->header('ETag') . "\n";
+        }
+        return $res->header('ETag') || undef;
+    }
+    elsif ($res->is_success) {
+        my $result;
+        eval { $result = $self->json->decode($res->content) };
+        return $result unless $@;
+        return {
+            file         => $res->decoded_content,
+            content_type => $res->content_type
+        };
     }
     else {
         $self->error($res->status_line);
