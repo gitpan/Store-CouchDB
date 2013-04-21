@@ -11,7 +11,7 @@ Store::CouchDB - a simple CouchDB driver
 
 =head1 VERSION
 
-Version 2.7.7
+Version 2.8.7.7
 
 =cut
 
@@ -41,7 +41,7 @@ brilliant Encoding::FixLatin module to fix this on the fly.
 
 =cut
 
-our $VERSION = '2.7';
+our $VERSION = '2.8';
 
 has 'debug' => (
     is      => 'rw',
@@ -712,6 +712,29 @@ object. I use it frequently with sections of config files.
     config({[host => HOST, port => PORT, db => DATABASE]})
 
 =cut
+
+
+=head2 create_db
+
+Create a Couch
+
+    create_db('name')
+
+=cut
+
+sub create_db {
+    my ($self, $db) = @_;
+
+    if($db){
+        $self->db($db);
+    }
+
+    my $method = $self->method();
+    $self->method('PUT');
+    my $res = $self->_call($self->db);
+    $self->method($method);
+    return $res;
+}
 
 sub config {
     my ($self, $data) = @_;
